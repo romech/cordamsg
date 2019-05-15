@@ -7,6 +7,7 @@ import net.corda.core.contracts.Command
 import net.corda.core.contracts.requireThat
 import net.corda.core.flows.*
 import net.corda.core.identity.Party
+import net.corda.core.node.StatesToRecord
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.utilities.ProgressTracker
@@ -51,10 +52,10 @@ object MessagingFlow {
             // Stage 1.
             progressTracker.currentStep = GENERATING_TRANSACTION
             // Generate an unsigned transaction.
-            val iouState = MsgState(text, serviceHub.myInfo.legalIdentities.first(), otherParty)
-            val txCommand = Command(MsgContract.Create(), iouState.participants.map { it.owningKey })
+            val msgState = MsgState(text, serviceHub.myInfo.legalIdentities.first(), otherParty)
+            val txCommand = Command(MsgContract.Create(), msgState.participants.map { it.owningKey })
             val txBuilder = TransactionBuilder(notary)
-                    .addOutputState(iouState, MsgContract.ID)
+                    .addOutputState(msgState, MsgContract.ID)
                     .addCommand(txCommand)
 
             // Stage 2.
@@ -89,12 +90,38 @@ object MessagingFlow {
                     val output = stx.tx.outputs.single().data
                     "This must be an IOU transaction." using (output is MsgState)
                     val msg = output as MsgState
-                    "I can't accept message with prohibited content." using (!msg.content.contains("Navalny", ignoreCase = true))
+                    "I can't accept message with prohibited content." using (!msg.isBlocked)
                 }
             }
             val txId = subFlow(signTransactionFlow).id
+            val finalTx = subFlow(ReceiveFinalityFlow(otherPartySession, expectedTxId = txId))
+            MsgContract.readOnlyOrganisations.forEach { callRegulator(finalTx, it) }
+            return finalTx
+        }
 
-            return subFlow(ReceiveFinalityFlow(otherPartySession, expectedTxId = txId))
+        @Suspendable
+        fun callRegulator(finalTx: SignedTransaction, organisationName: String) {
+            val regulator = serviceHub.identityService.partiesFromName(organisationName, true).single()
+            subFlow(ReportToRegulatorFlow(regulator, finalTx))
+        }
+    }
+
+    @InitiatingFlow
+    class ReportToRegulatorFlow(private val regulator: Party, private val finalTx: SignedTransaction) : FlowLogic<Unit>() {
+        @Suspendable
+        override fun call() {
+            val session = initiateFlow(regulator)
+            subFlow(SendTransactionFlow(session, finalTx))
+        }
+    }
+
+    @InitiatedBy(ReportToRegulatorFlow::class)
+    class ReceiveRegulatoryReportFlow(private val otherSideSession: FlowSession) : FlowLogic<Unit>() {
+        @Suspendable
+        override fun call() {
+            // Start the matching side of SendTransactionFlow above, but tell it to record all visible states even
+            // though they (as far as the node can tell) are nothing to do with us.
+            subFlow(ReceiveTransactionFlow(otherSideSession, true, StatesToRecord.ALL_VISIBLE))
         }
     }
 }

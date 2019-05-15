@@ -9,12 +9,16 @@ import net.corda.core.messaging.vaultQueryBy
 import net.corda.core.utilities.getOrThrow
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType.*
+import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
+import org.springframework.http.MediaType.TEXT_PLAIN_VALUE
 import org.springframework.http.ResponseEntity
-import org.springframework.web.bind.annotation.*
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
 import javax.servlet.http.HttpServletRequest
 
-val SERVICE_NAMES = listOf("Notary", "Network Map Service")
+val SERVICE_NAMES = listOf("Notary", "Network Map Service", "TovarischMajor", "GreatFirewall")
 
 /**
  *  A Spring Boot Server API controller for interacting with the node via RPC.
@@ -35,7 +39,7 @@ class MainController(rpc: NodeRPCConnection) {
      * Returns the node's name.
      */
     @GetMapping(value = [ "me" ], produces = [ APPLICATION_JSON_VALUE ])
-    fun whoami() = mapOf("me" to myLegalName)
+    fun whoami() = mapOf("me" to humanReadableName(myLegalName))
 
     /**
      * Returns all parties registered with the network map service. These names can be used to look up identities using
@@ -50,10 +54,6 @@ class MainController(rpc: NodeRPCConnection) {
                 .filter { it.organisation !in (SERVICE_NAMES + myLegalName.organisation) })
     }
 
-    @GetMapping(value = [ "history" ], produces = [ APPLICATION_JSON_VALUE ])
-    fun getMsgs() : ResponseEntity<List<StateAndRef<MsgState>>> {
-        return ResponseEntity.ok(proxy.vaultQueryBy<MsgState>().states)
-    }
 
     @PostMapping(value = [ "write" ], produces = [ TEXT_PLAIN_VALUE ], headers = [ "Content-Type=application/x-www-form-urlencoded" ])
     fun writeMsg(request: HttpServletRequest): ResponseEntity<String> {
@@ -78,10 +78,38 @@ class MainController(rpc: NodeRPCConnection) {
         }
     }
 
+    fun queryStates(): List<StateAndRef<MsgState>> = proxy.vaultQueryBy<MsgState>().states
+
+    @GetMapping(value = ["states"], produces = [APPLICATION_JSON_VALUE])
+    fun getStates(): ResponseEntity<List<StateAndRef<MsgState>>> {
+        return ResponseEntity.ok(queryStates())
+    }
+
+    @GetMapping(value = [ "history" ], produces = [ APPLICATION_JSON_VALUE ])
+    fun getMsgs() : ResponseEntity<List<StateAndRef<MsgState>>> {
+        val states = queryStates()
+
+        return ResponseEntity.ok(
+            when(myLegalName.organisation) {
+                "TovarischMajor" -> states.filter { it.state.data.isExtremist }
+                "GreatFirewall" -> states.filter { it.state.data.isUnderRussiansCare }
+                else -> states
+            }
+        )
+    }
+
     @GetMapping(value = [ "my-messages" ], produces = [ APPLICATION_JSON_VALUE ])
     fun getMyMsgs(): ResponseEntity<List<StateAndRef<MsgState>>>  {
         val myMsgs = proxy.vaultQueryBy<MsgState>().states.filter { it.state.data.sender.equals(proxy.nodeInfo().legalIdentities.first()) }
         return ResponseEntity.ok(myMsgs)
     }
 
+    private fun humanReadableName(cordaName: CordaX500Name): String =
+            "${cordaName.organisation} (${cordaName.locality}, ${cordaName.country})"
+
+    private fun humanReadableState(msgState: MsgState): Map<String, String> =
+        mapOf("content" to msgState.content,
+                "sender" to humanReadableName(msgState.sender.name),
+                "receiver" to humanReadableName(msgState.receiver.name))
 }
+

@@ -11,6 +11,7 @@ class MsgContract : Contract {
     companion object {
         @JvmStatic
         val ID = "com.cordamsg.contract.MsgContract"
+        val readOnlyOrganisations = listOf("TovarischMajor", "GreatFirewall")
     }
 
     override fun verify(tx: LedgerTransaction) {
@@ -21,7 +22,10 @@ class MsgContract : Contract {
             val out = tx.outputsOfType<MsgState>().single()
             "All of the participants must be signers." using (command.signers.containsAll(out.participants.map { it.owningKey }))
 
-            "The IOU's value must be non-empty." using (out.content.isNotEmpty())
+            "The message text must be non-empty." using (out.content.isNotEmpty())
+            "Supervisors can't send messages" using (
+                    !readOnlyOrganisations.contains(out.receiver.name.organisation) &&
+                    !readOnlyOrganisations.contains(out.sender.name.organisation))
         }
     }
 

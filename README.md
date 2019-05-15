@@ -10,5 +10,5 @@ Nodes are basically running on a single system, however it is easy to change (se
 ## Run
 1. `deployNodes` with Gradle
 2. Run `workflows-kotlin/build/nodes/runnodes`
-3. `runPartyAServer` (and others) with Gradle
+3. `runAliceServer` (and others) with Gradle
 4. Use API interface

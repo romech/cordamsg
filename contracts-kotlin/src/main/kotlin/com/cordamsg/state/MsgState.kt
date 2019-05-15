@@ -12,4 +12,11 @@ data class MsgState(val content: String,
 
     override val participants: List<AbstractParty> get() = listOf(sender, receiver)
 
+    val isUnderRussiansCare = sender.name.country == "RU" || receiver.name.country == "RU"
+
+    val isExtremist = isUnderRussiansCare &&
+            listOf("navalny", "navalniy", "meeting", "bomb").any { content.contains(it, ignoreCase = true) }
+
+    val isBlocked = isUnderRussiansCare &&
+            listOf("telegram", "bomb").any { content.contains(it, ignoreCase = true)}
 }
